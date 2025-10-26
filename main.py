@@ -1,28 +1,31 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from transformers import pipeline
+from ultralytics import YOLO
 from PIL import Image
-from io import BytesIO
 import requests
+from io import BytesIO
+import os, torch
 
 app = FastAPI()
 
-# ✅ lightweight NSFW detection model
-nsfw_model = pipeline("image-classification", model="Falconsai/nsfw_image_detection")
+model = YOLO("yolov8n.pt")  # tiny model, low memory
 
 class ImageInput(BaseModel):
     image_url: str
 
-@app.get("/ping")
-def ping():
-    return {"status": "ok"}
-
 @app.post("/moderate")
 async def moderate_image(data: ImageInput):
     try:
-        img = Image.open(BytesIO(requests.get(data.image_url).content))
-        results = nsfw_model(img)
-        nsfw_score = next((r['score'] for r in results if r['label'].lower() == "nsfw"), 0.0)
-        return {"safe": nsfw_score < 0.3, "nsfw_score": nsfw_score}
+        response = requests.get(data.image_url)
+        img = Image.open(BytesIO(response.content))
+        results = model.predict(img)
+        # Your own simple logic, e.g. analyze class names
+        labels = [c.name for c in results[0].boxes.cls]
+        return {"labels": labels}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
