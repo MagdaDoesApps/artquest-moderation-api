@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from nsfw_detector import predict
+from open_nsfw2 import predict
 from PIL import Image
 import requests
 from io import BytesIO
@@ -26,5 +26,6 @@ async def moderate_image(data: ImageInput):
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
