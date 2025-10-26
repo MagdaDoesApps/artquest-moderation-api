@@ -5,5 +5,5 @@ uvicorn
 pillow
 requests
 ultralytics
-nsfw_detector
-nsfw_image_detector
+open_nsfw2
+
