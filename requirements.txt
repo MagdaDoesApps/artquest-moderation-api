@@ -5,5 +5,5 @@ uvicorn
 pillow
 requests
 ultralytics
-git+https://github.com/GantMan/nsfw_model.git#egg=nsfw_image_detector
-git+https://github.com/GantMan/nsfw_detector.git
+open_nsfw2
+
