@@ -5,6 +5,8 @@ from PIL import Image
 import requests
 from io import BytesIO
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Only warnings and errors
+import tensorflow as tf
 
 app = FastAPI()
 
@@ -24,3 +26,4 @@ async def moderate_image(data: ImageInput):
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
