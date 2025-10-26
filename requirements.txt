@@ -1,11 +1,9 @@
-tensorflow==1.15
-tensorflow-hub==0.7.0
-
+tensorflow
+tensorflow-hub
 fastapi
 uvicorn
 pillow
-nsfw_image_detector
 requests
 ultralytics
-
 nsfw_detector
+
