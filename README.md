@@ -1,2 +1,2 @@
-# artquest-moderation-api
-Filter our NSFW content for ArtQuest Bot App
+# ArtQuest Image Moderation API
+This FastAPI service checks images for NSFW content.

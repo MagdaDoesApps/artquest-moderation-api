@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pillow
+nsfw_image_detector
+requests
+ultralytics
+nsfw_detector
