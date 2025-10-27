@@ -1,8 +1,7 @@
-onnxruntime
 fastapi
 uvicorn
 pillow
 requests
-ultralytics
 torch
-
+ultralytics           # For YOLOv8 (NSFW)
+git+https://github.com/ultralytics/yolov5.git  # YOLOv5 (weapons)
