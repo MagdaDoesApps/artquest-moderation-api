@@ -13,7 +13,7 @@ app = FastAPI()
 nsfw_model = YOLO("yolov8n.pt")
 
 # 2️⃣ Custom trained weapon detection model (ONNX)
-weapon_model = YOLO("best.onnx")
+weapon_model = YOLO("normal.onnx")
 
 class ImageInput(BaseModel):
     image_url: str
@@ -25,47 +25,34 @@ def root():
 @app.post("/moderate")
 async def moderate_image(data: ImageInput):
     try:
-        # Fetch image bytes
+        # Download the image
         response = requests.get(data.image_url, timeout=10)
         response.raise_for_status()
+        img = Image.open(BytesIO(response.content)).convert("RGB")
 
-        # Try opening image
-        try:
-            img = Image.open(BytesIO(response.content)).convert("RGB")
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
+        # 🔍 Run prediction using your ONNX or YOLOv8 model
+        results = model.predict(img, conf=0.25, verbose=False)
 
-        # --- Run YOLOv8n (general object detection for NSFW cues) ---
-        nsfw_results = nsfw_model.predict(img, verbose=False)
-        nsfw_labels = [nsfw_model.names[int(b.cls)] for b in nsfw_results[0].boxes]
+        # Extract detected labels
+        labels = [model.names[int(b.cls)] for b in results[0].boxes]
 
-        # --- Run custom ONNX model for weapon detection ---
-        weapon_results = weapon_model.predict(img, verbose=False)
-        weapon_labels = [weapon_model.names[int(b.cls)] for b in weapon_results[0].boxes]
+        # ✅ Debug print to Render logs
+        print("🧠 Detected labels:", labels)
 
-        # --- Define unsafe keywords ---
-        nsfw_keywords = ["nude", "underwear", "naked", "sexual", "person"]
-        weapon_keywords = ["knife", "gun", "rifle", "pistol", "weapon"]
+        # Define possible unsafe keywords
+        unsafe_keywords = ["gun", "pistol", "rifle", "knife", "weapon", "nude", "blood", "violence"]
 
-        # --- Determine unsafe content ---
-        nsfw_detected = any(any(k in l.lower() for k in nsfw_keywords) for l in nsfw_labels)
-        weapon_detected = any(any(k in l.lower() for k in weapon_keywords) for l in weapon_labels)
-
-        unsafe_labels = []
-        if nsfw_detected:
-            unsafe_labels.append("nsfw/sexual")
-        if weapon_detected:
-            unsafe_labels.append("weapon")
+        unsafe_detected = any(
+            any(k in label.lower() for k in unsafe_keywords)
+            for label in labels
+        )
 
         return {
-            "safe": not (nsfw_detected or weapon_detected),
-            "unsafe_reasons": unsafe_labels,
-            "nsfw_labels": nsfw_labels,
-            "weapon_labels": weapon_labels,
+            "safe": not unsafe_detected,
+            "labels": labels,
+            "unsafe_labels": [l for l in labels if any(k in l.lower() for k in unsafe_keywords)]
         }
 
-    except requests.RequestException as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -74,3 +61,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
