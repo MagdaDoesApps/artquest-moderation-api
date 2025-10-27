@@ -3,5 +3,6 @@ uvicorn
 pillow
 requests
 ultralytics==8.0.120
-onnxruntime==1.17.3
+onnxruntime-lite==1.17.3
 numpy
+
