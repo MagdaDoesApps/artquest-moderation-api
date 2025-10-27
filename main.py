@@ -5,7 +5,7 @@ from PIL import Image
 from io import BytesIO
 import requests
 import os
-import onnxruntime as ort
+import onnxruntime_lite as ort
 import numpy as np
 
 app = FastAPI()
@@ -77,3 +77,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
