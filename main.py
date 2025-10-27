@@ -8,14 +8,11 @@ import os
 
 app = FastAPI()
 
-# ---- Load lightweight YOLOv8 models ----
-# 1️⃣ General object detector (weapons, knives, guns)
+# Load YOLOv8 model (lightweight)
 weapon_model = YOLO("yolov8n.pt")
 
-# 2️⃣ Lightweight NSFW classifier (custom threshold using skin detection)
-#     Instead of a heavy CNN, we'll just do a color-based approximation.
-def is_nsfw_image(image: Image.Image) -> bool:
-    # Very rough "skin-tone ratio" heuristic
+def is_nsfw_image(image: Image.Image) -> float:
+    """Return a score between 0 and 1 for NSFW likelihood (rough skin-tone heuristic)."""
     img = image.convert("RGB").resize((128, 128))
     pixels = img.load()
     total, skin_like = 0, 0
@@ -23,20 +20,16 @@ def is_nsfw_image(image: Image.Image) -> bool:
         for y in range(img.height):
             r, g, b = pixels[x, y]
             total += 1
-            if r > 95 and g > 40 and b > 20 and max(r, g, b) - min(r, g, b) > 15 and r > g and r > b:
+            if r > 95 and g > 40 and b > 20 and max(r, g, b)-min(r, g, b) > 15 and r > g and r > b:
                 skin_like += 1
-    ratio = skin_like / total
-    return ratio > 0.35  # tweak threshold for strictness
-
+    return skin_like / total
 
 class ImageInput(BaseModel):
     image_url: str
 
-
 @app.get("/")
 def root():
     return {"message": "✅ ArtQuest Moderation API is online!"}
-
 
 @app.post("/moderate")
 async def moderate_image(data: ImageInput):
@@ -47,29 +40,25 @@ async def moderate_image(data: ImageInput):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
 
-    # ---- YOLO weapon/gore detection ----
+    # YOLO detection for weapons/gore
     results = weapon_model.predict(img, verbose=False)
     labels = [weapon_model.names[int(b.cls)] for b in results[0].boxes]
 
-    unsafe_keywords = ["knife", "gun", "weapon", "blood"]
-    weapon_detected = any(k in l.lower() for l in labels for k in unsafe_keywords)
+    # Scoring
+    weapon_score = 1.0 if any(k in l.lower() for l in labels for k in ["knife", "gun", "weapon"]) else 0.0
+    gore_score = 1.0 if any(k in l.lower() for l in labels for k in ["blood"]) else 0.0
+    nsfw_score = is_nsfw_image(img)
+    violence_score = max(weapon_score, gore_score)  # rough approximation
 
-    # ---- Color-based NSFW check ----
-    nsfw_detected = is_nsfw_image(img)
-
-    unsafe = weapon_detected or nsfw_detected
-    unsafe_reasons = []
-    if weapon_detected:
-        unsafe_reasons.append("weapon")
-    if nsfw_detected:
-        unsafe_reasons.append("nsfw/sexual")
+    safe = nsfw_score < 0.35 and weapon_score == 0.0 and gore_score == 0.0
 
     return {
-        "safe": not unsafe,
-        "unsafe_reasons": unsafe_reasons,
-        "labels": labels,
+        "Safe": safe,
+        "NSFWScore": nsfw_score,
+        "ViolenceScore": violence_score,
+        "WeaponScore": weapon_score,
+        "GoreScore": gore_score
     }
-
 
 if __name__ == "__main__":
     import uvicorn
