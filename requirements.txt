@@ -1,6 +1,8 @@
+onnxruntime
 fastapi
 uvicorn
 pillow
 requests
 ultralytics
 torch
+
