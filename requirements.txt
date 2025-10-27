@@ -1,8 +1,7 @@
+onnxruntime
 fastapi
 uvicorn
 pillow
 requests
-torch>=2.0.0
-ultralytics>=8.0.0
-tensorflow==2.12.0
-nsfw_detector==1.1.1
+ultralytics
+torch
