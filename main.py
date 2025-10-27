@@ -2,14 +2,17 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from ultralytics import YOLO
 from PIL import Image
-import requests
 from io import BytesIO
+import requests
 import os
 
 app = FastAPI()
 
-# Load YOLO model once
-model = YOLO("yolov8n.pt")  # Tiny, efficient model
+# -------------------------------
+# Load models
+# -------------------------------
+nsfw_model = YOLO("yolov8n.pt")   # Tiny COCO model (for person/nude)
+weapon_model = YOLO("best.pt")    # Weapons/knife detector
 
 class ImageInput(BaseModel):
     image_url: str
@@ -21,46 +24,46 @@ def root():
 @app.post("/moderate")
 async def moderate_image(data: ImageInput):
     try:
-        # Fetch the image bytes
+        # Fetch image
         response = requests.get(data.image_url, timeout=10)
         response.raise_for_status()
-
-        # Try opening image with Pillow
-        try:
-            img = Image.open(BytesIO(response.content)).convert("RGB")
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
-
-        # Run YOLO prediction
-        results = model.predict(img, verbose=False)
-
-        # Extract class names (labels)
-        labels = []
-        for box in results[0].boxes:
-            class_id = int(box.cls)
-            labels.append(model.names[class_id])
-
-        # Define which classes might be unsafe (can tweak)
-        unsafe_keywords = ["knife", "knife", "gun", "weapon", "blood", "nude", "person"]
-
-        # Check if any unsafe label is detected
-        unsafe = any(any(k in label.lower() for k in unsafe_keywords) for label in labels)
-
-        return {
-            "safe": not unsafe,
-            "labels": labels,
-            "unsafe_labels": [l for l in labels if any(k in l.lower() for k in unsafe_keywords)]
-        }
-
-    except requests.RequestException as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {e}")
+        img = Image.open(BytesIO(response.content)).convert("RGB")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
 
+    # -------------------------------
+    # Run NSFW detection (using COCO model)
+    # -------------------------------
+    nsfw_results = nsfw_model.predict(img, verbose=False)
+    nsfw_labels = [nsfw_model.names[int(b.cls)] for b in nsfw_results[0].boxes]
+    nsfw_keywords = ["nude", "person"]
+    nsfw_detected = any(k in l.lower() for l in nsfw_labels for k in nsfw_keywords)
+
+    # -------------------------------
+    # Run weapons detection
+    # -------------------------------
+    weapon_results = weapon_model.predict(img, verbose=False)
+    weapon_labels = [weapon_model.names[int(b.cls)] for b in weapon_results[0].boxes]
+    weapon_keywords = ["knife", "gun", "weapon", "blade"]
+    weapon_detected = any(k in l.lower() for l in weapon_labels for k in weapon_keywords)
+
+    # -------------------------------
+    # Combine results
+    # -------------------------------
+    unsafe_reasons = []
+    if nsfw_detected:
+        unsafe_reasons.append("nsfw/sexual")
+    if weapon_detected:
+        unsafe_reasons.append("weapon")
+
+    return {
+        "safe": not unsafe_reasons,
+        "unsafe_reasons": unsafe_reasons,
+        "nsfw_labels": nsfw_labels,
+        "weapon_labels": weapon_labels
+    }
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 10000))  # Render injects PORT
+    port = int(os.environ.get("PORT", 10000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
-
-
