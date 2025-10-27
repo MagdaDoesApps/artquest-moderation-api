@@ -2,17 +2,18 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from ultralytics import YOLO
 from PIL import Image
-from io import BytesIO
 import requests
+from io import BytesIO
 import os
 
 app = FastAPI()
 
-# -------------------------------
-# Load models
-# -------------------------------
-nsfw_model = YOLO("yolov8n.pt")   # Tiny COCO model (for person/nude)
-weapon_model = YOLO("best.pt")    # Weapons/knife detector
+# --- Load Models ---
+# 1️⃣ General NSFW/gore model (lightweight YOLOv8n)
+nsfw_model = YOLO("yolov8n.pt")
+
+# 2️⃣ Custom trained weapon detection model (ONNX)
+weapon_model = YOLO("best.onnx")
 
 class ImageInput(BaseModel):
     image_url: str
@@ -24,44 +25,50 @@ def root():
 @app.post("/moderate")
 async def moderate_image(data: ImageInput):
     try:
-        # Fetch image
+        # Fetch image bytes
         response = requests.get(data.image_url, timeout=10)
         response.raise_for_status()
-        img = Image.open(BytesIO(response.content)).convert("RGB")
+
+        # Try opening image
+        try:
+            img = Image.open(BytesIO(response.content)).convert("RGB")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
+
+        # --- Run YOLOv8n (general object detection for NSFW cues) ---
+        nsfw_results = nsfw_model.predict(img, verbose=False)
+        nsfw_labels = [nsfw_model.names[int(b.cls)] for b in nsfw_results[0].boxes]
+
+        # --- Run custom ONNX model for weapon detection ---
+        weapon_results = weapon_model.predict(img, verbose=False)
+        weapon_labels = [weapon_model.names[int(b.cls)] for b in weapon_results[0].boxes]
+
+        # --- Define unsafe keywords ---
+        nsfw_keywords = ["nude", "underwear", "naked", "sexual", "person"]
+        weapon_keywords = ["knife", "gun", "rifle", "pistol", "weapon"]
+
+        # --- Determine unsafe content ---
+        nsfw_detected = any(any(k in l.lower() for k in nsfw_keywords) for l in nsfw_labels)
+        weapon_detected = any(any(k in l.lower() for k in weapon_keywords) for l in weapon_labels)
+
+        unsafe_labels = []
+        if nsfw_detected:
+            unsafe_labels.append("nsfw/sexual")
+        if weapon_detected:
+            unsafe_labels.append("weapon")
+
+        return {
+            "safe": not (nsfw_detected or weapon_detected),
+            "unsafe_reasons": unsafe_labels,
+            "nsfw_labels": nsfw_labels,
+            "weapon_labels": weapon_labels,
+        }
+
+    except requests.RequestException as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {e}")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    # -------------------------------
-    # Run NSFW detection (using COCO model)
-    # -------------------------------
-    nsfw_results = nsfw_model.predict(img, verbose=False)
-    nsfw_labels = [nsfw_model.names[int(b.cls)] for b in nsfw_results[0].boxes]
-    nsfw_keywords = ["nude", "person"]
-    nsfw_detected = any(k in l.lower() for l in nsfw_labels for k in nsfw_keywords)
-
-    # -------------------------------
-    # Run weapons detection
-    # -------------------------------
-    weapon_results = weapon_model.predict(img, verbose=False)
-    weapon_labels = [weapon_model.names[int(b.cls)] for b in weapon_results[0].boxes]
-    weapon_keywords = ["knife", "gun", "weapon", "blade"]
-    weapon_detected = any(k in l.lower() for l in weapon_labels for k in weapon_keywords)
-
-    # -------------------------------
-    # Combine results
-    # -------------------------------
-    unsafe_reasons = []
-    if nsfw_detected:
-        unsafe_reasons.append("nsfw/sexual")
-    if weapon_detected:
-        unsafe_reasons.append("weapon")
-
-    return {
-        "safe": not unsafe_reasons,
-        "unsafe_reasons": unsafe_reasons,
-        "nsfw_labels": nsfw_labels,
-        "weapon_labels": weapon_labels
-    }
 
 if __name__ == "__main__":
     import uvicorn
