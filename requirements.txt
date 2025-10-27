@@ -3,5 +3,5 @@ uvicorn
 pillow
 requests
 torch
-ultralytics           # For YOLOv8 (NSFW)
-git+https://github.com/ultralytics/yolov5.git  # YOLOv5 (weapons)
+ultralytics
+yolov5
