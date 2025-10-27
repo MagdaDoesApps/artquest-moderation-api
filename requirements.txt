@@ -2,5 +2,7 @@ fastapi
 uvicorn
 pillow
 requests
-ultralytics==8.0.120
-torch==2.0.1
+torch>=2.0.0
+ultralytics>=8.0.0
+tensorflow==2.12.0
+nsfw_detector==1.1.1
