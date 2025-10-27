@@ -1,19 +1,19 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from ultralytics import YOLO           # For NSFW detection
-import torch                           # For YOLOv5 (weapons)
+from nsfw_detector import predict
+from ultralytics import YOLO
 from PIL import Image
-import requests
 from io import BytesIO
+import requests
 import os
 
 app = FastAPI()
 
-# --- Load models once ---
-nsfw_model = YOLO("yolov8n.pt")              # NSFW detection
-weapons_model = torch.hub.load(
-    "ultralytics/yolov5", "custom", path="best.pt", force_reload=True
-)                                             # Weapons detection
+# Load lightweight NSFW model
+nsfw_model = predict.load_model("nsfw_model.h5")
+
+# Load tiny YOLOv8 model for object detection (guns, knives, etc.)
+weapon_model = YOLO("yolov8n.pt")
 
 class ImageInput(BaseModel):
     image_url: str
@@ -25,47 +25,37 @@ def root():
 @app.post("/moderate")
 async def moderate_image(data: ImageInput):
     try:
-        # Fetch image bytes
+        # Fetch image
         response = requests.get(data.image_url, timeout=10)
         response.raise_for_status()
+        img_bytes = BytesIO(response.content)
+        img = Image.open(img_bytes).convert("RGB")
 
-        # Open image with Pillow
-        try:
-            img = Image.open(BytesIO(response.content)).convert("RGB")
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
+        # NSFW check
+        nsfw_result = predict.classify(nsfw_model, data.image_url)
+        nsfw_scores = list(nsfw_result.values())[0]
 
-        # --- NSFW Detection ---
-        nsfw_results = nsfw_model.predict(img, verbose=False)
-        nsfw_labels = [
-            nsfw_model.names[int(box.cls)] for box in nsfw_results[0].boxes
-        ]
-        nsfw_keywords = ["nude", "person", "sex"]
-        nsfw_flag = any(any(k in label.lower() for k in nsfw_keywords) for label in nsfw_labels)
+        nsfw_score = nsfw_scores.get("sexy", 0) + nsfw_scores.get("porn", 0) + nsfw_scores.get("hentai", 0)
 
-        # --- Weapons Detection ---
-        # Convert PIL image to numpy array
-        img_np = np.array(img)
-        weapons_results = weapons_model(img_np)
-        weapons_labels = [weapons_results.names[int(cls)] for cls in weapons_results.xyxy[0][:, 5]]
-        weapons_keywords = ["knife", "gun", "weapon"]
-        weapons_flag = any(any(k in label.lower() for k in weapons_keywords) for label in weapons_labels)
+        # Weapon detection (YOLO)
+        results = weapon_model.predict(img, verbose=False)
+        labels = [weapon_model.names[int(box.cls)] for box in results[0].boxes]
+        unsafe_weapons = any(label.lower() in ["knife", "gun", "weapon"] for label in labels)
 
-        # Overall unsafe flag
-        unsafe = nsfw_flag or weapons_flag
-
+        # Final decision
+        unsafe = nsfw_score > 0.3 or unsafe_weapons
         return {
             "safe": not unsafe,
-            "nsfw_labels": nsfw_labels,
-            "weapons_labels": weapons_labels,
-            "unsafe_labels": nsfw_labels + weapons_labels,
+            "nsfw_score": round(nsfw_score, 3),
+            "labels": labels,
+            "unsafe_reason": {
+                "nsfw": nsfw_score > 0.3,
+                "weapon": unsafe_weapons
+            }
         }
 
-    except requests.RequestException as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 if __name__ == "__main__":
     import uvicorn
