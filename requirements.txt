@@ -3,6 +3,4 @@ uvicorn
 pillow
 requests
 ultralytics==8.0.120
-onnxruntime-lite==1.17.3
-numpy
-
+torch==2.0.1
