@@ -8,12 +8,8 @@ import os
 
 app = FastAPI()
 
-# --- Load Models ---
-# 1️⃣ General NSFW/gore model (lightweight YOLOv8n)
-nsfw_model = YOLO("yolov8n.pt")
-
-# 2️⃣ Custom trained weapon detection model (ONNX)
-weapon_model = YOLO("normal.onnx")
+# Load YOLO model once
+model = YOLO("yolov8n.pt")  # Tiny, efficient model
 
 class ImageInput(BaseModel):
     image_url: str
@@ -25,40 +21,46 @@ def root():
 @app.post("/moderate")
 async def moderate_image(data: ImageInput):
     try:
-        # Download the image
+        # Fetch the image bytes
         response = requests.get(data.image_url, timeout=10)
         response.raise_for_status()
-        img = Image.open(BytesIO(response.content)).convert("RGB")
 
-        # 🔍 Run prediction using your ONNX or YOLOv8 model
-        results = model.predict(img, conf=0.25, verbose=False)
+        # Try opening image with Pillow
+        try:
+            img = Image.open(BytesIO(response.content)).convert("RGB")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
 
-        # Extract detected labels
-        labels = [model.names[int(b.cls)] for b in results[0].boxes]
+        # Run YOLO prediction
+        results = model.predict(img, verbose=False)
 
-        # ✅ Debug print to Render logs
-        print("🧠 Detected labels:", labels)
+        # Extract class names (labels)
+        labels = []
+        for box in results[0].boxes:
+            class_id = int(box.cls)
+            labels.append(model.names[class_id])
 
-        # Define possible unsafe keywords
-        unsafe_keywords = ["gun", "pistol", "rifle", "knife", "weapon", "nude", "blood", "violence"]
+        # Define which classes might be unsafe (can tweak)
+        unsafe_keywords = ["knife", "knife", "gun", "weapon", "blood", "nude", "person"]
 
-        unsafe_detected = any(
-            any(k in label.lower() for k in unsafe_keywords)
-            for label in labels
-        )
+        # Check if any unsafe label is detected
+        unsafe = any(any(k in label.lower() for k in unsafe_keywords) for label in labels)
 
         return {
-            "safe": not unsafe_detected,
+            "safe": not unsafe,
             "labels": labels,
             "unsafe_labels": [l for l in labels if any(k in l.lower() for k in unsafe_keywords)]
         }
 
+    except requests.RequestException as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 10000))  # Render injects PORT
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
