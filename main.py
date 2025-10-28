@@ -41,7 +41,7 @@ async def moderate_image(data: ImageInput):
             labels.append(model.names[class_id])
 
         # Define which classes might be unsafe (can tweak)
-        unsafe_keywords = ["knife", "knife", "gun", "weapon", "blood", "nude", "person"]
+        unsafe_keywords = ["knife", "gun", "weapon", "blood", "person"]
 
         # Check if any unsafe label is detected
         unsafe = any(any(k in label.lower() for k in unsafe_keywords) for label in labels)
@@ -62,5 +62,6 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))  # Render injects PORT
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
